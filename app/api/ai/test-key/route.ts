@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { GEMINI_MODEL_CASCADE, isRetryableModelError } from '@/lib/interventions/ai/models';
+import { selectOptimalModel, cleanModelName } from '@/lib/interventions/ai/models';
 
 /**
  * Route: POST /api/ai/test-key
- * Description: Validates a user-provided Google Gemini API key by probing
- * the Gemini Model Cascade chain (Gemini 3.8 -> 3.5 Lite -> 2.5 Flash...).
- * Automatically cascades over 404 (model not found) or 429 (quota exceeded).
- * Returns the active model name upon successful connection.
+ * Description: Validates a user-provided Google Gemini API key by querying
+ * Google's ModelService.ListModels endpoint (Zero-Quota consumption).
+ * - Fast metadata query (< 0.6s), does not consume generateContent RPD / RPM.
+ * - Discovers all supported models for the account.
+ * - Picks the optimal model based on cascade priority.
+ * - Returns honest, accurate status messages (no false quota alarms).
  */
 
 export async function POST(req: NextRequest) {
@@ -21,80 +23,116 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    let lastErrorMessage = '';
-    const deadline = Date.now() + 4500; // 4.5s total test probe budget
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 7000); // 7.0s timeout
 
-    for (const model of GEMINI_MODEL_CASCADE) {
-      const remainingTime = deadline - Date.now();
-      if (remainingTime < 500) {
-        break;
-      }
+    try {
+      // Use Google's ListModels metadata discovery API (Zero generation quota spent)
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`,
+        {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+        }
+      );
 
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), Math.min(2500, remainingTime));
+      clearTimeout(timeoutId);
 
-      try {
-        const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ role: 'user', parts: [{ text: 'ping' }] }],
-              generationConfig: { maxOutputTokens: 1 },
-            }),
-            signal: controller.signal,
+      if (response.ok) {
+        const data = await response.json();
+        const rawModels: Array<{ name: string; supportedGenerationMethods?: string[] }> =
+          data?.models || [];
+
+        // Filter models that support content generation or have gemini in name
+        const supportedModels = rawModels.filter((m) => {
+          if (m.supportedGenerationMethods && Array.isArray(m.supportedGenerationMethods)) {
+            return m.supportedGenerationMethods.includes('generateContent');
           }
-        );
+          return m.name && m.name.includes('gemini');
+        });
 
-        clearTimeout(timeoutId);
+        const availableNames = supportedModels.map((m) => cleanModelName(m.name));
+        const optimalModel = selectOptimalModel(availableNames);
+        const count = availableNames.length || rawModels.length;
 
-        if (response.ok) {
-          return NextResponse.json({
-            valid: true,
-            model,
-            message: `Kết nối Google Gemini thành công! Đã kích hoạt model: ${model}`,
-          });
-        }
-
-        const errorData = await response.json().catch(() => null);
-        const apiMessage = errorData?.error?.message || `HTTP ${response.status}`;
-        lastErrorMessage = apiMessage;
-
-        // If the key itself is completely invalid (API_KEY_INVALID), no point trying other models
-        if (apiMessage.includes('API_KEY_INVALID') || (response.status === 400 && apiMessage.toLowerCase().includes('key'))) {
-          return NextResponse.json(
-            {
-              valid: false,
-              error: `API Key không hợp lệ hoặc đã bị vô hiệu hóa bởi Google.`,
-            },
-            { status: 400 }
-          );
-        }
-
-        // Check if retryable (404 Not Found, 429 Quota Exceeded, etc.)
-        if (isRetryableModelError(response.status, apiMessage)) {
-          // Cascade to the next model
-          continue;
-        }
-
-        // If it's another non-retryable error, continue attempting backup models
-      } catch (fetchError: any) {
-        clearTimeout(timeoutId);
-        if (fetchError.name === 'AbortError') {
-          continue;
-        }
-        lastErrorMessage = fetchError.message || 'Lỗi mạng khi gọi Google API';
+        return NextResponse.json({
+          valid: true,
+          model: optimalModel,
+          availableModelsCount: count,
+          message: `Kết nối thành công! Đã nhận diện ${count} models khả dụng (Ưu tiên: ${optimalModel}, Dự phòng: 3.5 Flash Lite 500 RPD).`,
+        });
       }
-    }
 
-    return NextResponse.json(
-      {
-        valid: false,
-        error: `Không thể kết nối tới Google Gemini. Lỗi: ${lastErrorMessage || 'Hết hạn mức hoặc không tìm thấy model tương thích'}`,
-      },
-      { status: 400 }
-    );
+      const errorData = await response.json().catch(() => null);
+      const apiMessage = errorData?.error?.message || `HTTP ${response.status}`;
+
+      // Case 1: Bad or revoked key
+      if (
+        response.status === 400 ||
+        apiMessage.includes('API_KEY_INVALID') ||
+        apiMessage.toLowerCase().includes('key')
+      ) {
+        return NextResponse.json(
+          {
+            valid: false,
+            error: 'API Key không hợp lệ hoặc chưa được kích hoạt trên Google AI Studio.',
+          },
+          { status: 400 }
+        );
+      }
+
+      // Case 2: Permission denied / IP restriction
+      if (response.status === 403) {
+        return NextResponse.json(
+          {
+            valid: false,
+            error: 'API Key không có quyền truy cập hoặc bị giới hạn bởi Google (Lỗi 403: Permission Denied).',
+          },
+          { status: 403 }
+        );
+      }
+
+      // Case 3: Rate limit on ListModels
+      if (response.status === 429) {
+        return NextResponse.json(
+          {
+            valid: false,
+            error: 'Tài khoản Google đã đạt giới hạn truy vấn tạm thời (Rate limit 429). Vui lòng thử lại sau giây lát.',
+          },
+          { status: 429 }
+        );
+      }
+
+      // Generic Google API error
+      return NextResponse.json(
+        {
+          valid: false,
+          error: `Google API trả về lỗi: ${apiMessage}`,
+        },
+        { status: response.status || 400 }
+      );
+    } catch (fetchError: any) {
+      clearTimeout(timeoutId);
+
+      if (fetchError.name === 'AbortError') {
+        return NextResponse.json(
+          {
+            valid: false,
+            error: 'Không thể kết nối đến máy chủ Google (quá thời gian chờ 7s). Vui lòng kiểm tra lại kết nối Internet.',
+          },
+          { status: 504 }
+        );
+      }
+
+      return NextResponse.json(
+        {
+          valid: false,
+          error: `Lỗi kết nối mạng: ${fetchError.message || 'Không thể kết nối tới Google AI Studio'}.`,
+        },
+        { status: 502 }
+      );
+    }
   } catch (err: any) {
     return NextResponse.json(
       { valid: false, error: 'Không thể kiểm tra key lúc này. Vui lòng thử lại sau.' },

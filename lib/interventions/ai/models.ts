@@ -26,6 +26,43 @@ export const GEMINI_MODEL_CASCADE: readonly string[] = [
 ];
 
 /**
+ * Strips the 'models/' prefix from a Google model name string if present.
+ */
+export function cleanModelName(modelName: string): string {
+  if (!modelName) return '';
+  return modelName.replace(/^models\//, '');
+}
+
+/**
+ * Given a list of model names returned by Google ListModels, selects the highest-priority
+ * candidate matching GEMINI_MODEL_CASCADE, or intelligently picks the best available Flash model.
+ */
+export function selectOptimalModel(availableModels: string[]): string {
+  if (!availableModels || availableModels.length === 0) {
+    return GEMINI_MODEL_CASCADE[0]; // Default to top tier
+  }
+
+  const normalizedAvailable = new Set(availableModels.map(cleanModelName));
+
+  // 1. Check priority cascade in order
+  for (const candidate of GEMINI_MODEL_CASCADE) {
+    if (normalizedAvailable.has(candidate)) {
+      return candidate;
+    }
+  }
+
+  // 2. If no exact cascade match, look for any Flash model available
+  for (const m of normalizedAvailable) {
+    if (m.includes('flash')) {
+      return m;
+    }
+  }
+
+  // 3. Fallback to first available or standard
+  return cleanModelName(availableModels[0]) || 'gemini-2.5-flash';
+}
+
+/**
  * Checks whether an HTTP response status or error message warrants
  * cascading to the next model in the chain (e.g. 404 Model Not Found or 429 Quota Exceeded).
  */

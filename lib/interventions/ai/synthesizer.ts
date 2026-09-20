@@ -33,17 +33,17 @@ export async function synthesizeAIIntervention(
   }
 
   const prompt = buildAIEmpathyPrompt(context);
-  const deadline = Date.now() + 3500; // 3.5s total budget across cascade attempts
+  const deadline = Date.now() + 10000; // 10s total budget across cascade attempts
 
   for (const model of GEMINI_MODEL_CASCADE) {
     const remainingTime = deadline - Date.now();
-    if (remainingTime < 500) {
+    if (remainingTime < 800) {
       // Not enough time left for another network hop
       break;
     }
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), Math.min(2500, remainingTime));
+    const timeoutId = setTimeout(() => controller.abort(), Math.min(4500, remainingTime));
 
     try {
       const response = await fetch(
