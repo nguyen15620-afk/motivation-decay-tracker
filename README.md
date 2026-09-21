@@ -2,6 +2,8 @@
 
 > Hệ thống theo dõi xu hướng động lực theo thời gian, phát hiện sự xói mòn tiệm tiến (gradual decay) bằng hồi quy tuyến tính (Linear Regression) và kích hoạt can thiệp sớm (Smart Interventions) trước khi người dùng từ bỏ mục tiêu.
 
+📖 **[Xem Sổ Tay Hướng Dẫn Sử Dụng (User Guide)](./USER_GUIDE.md)**
+
 ---
 
 ## 🌟 Tính Năng Cốt Lõi
