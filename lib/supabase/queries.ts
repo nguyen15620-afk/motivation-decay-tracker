@@ -200,6 +200,32 @@ export async function createProject(project: Omit<Project, 'id' | 'created_at'>)
   return newProject;
 }
 
+export async function deleteProject(id: string): Promise<boolean> {
+  const existing = await getProjectById(id);
+  if (!existing) {
+    return false;
+  }
+
+  if (isSupabaseConfigured && supabase) {
+    const { error } = await supabase
+      .from('projects')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      console.error('[Supabase] Error deleting project:', error);
+      return false;
+    }
+  }
+
+  // Cascade delete in local in-memory fallback stores
+  mockProjects = mockProjects.filter((p) => p.id !== id);
+  mockCheckins = mockCheckins.filter((c) => c.project_id !== id);
+  mockTrendFlags = mockTrendFlags.filter((f) => f.project_id !== id);
+  mockInterventions = mockInterventions.filter((i) => i.project_id !== id);
+  return true;
+}
+
 export async function getCheckins(projectId?: string): Promise<Checkin[]> {
   if (isSupabaseConfigured && supabase) {
     let query = supabase.from('checkins').select('*').order('created_at', { ascending: true });

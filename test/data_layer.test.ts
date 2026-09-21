@@ -4,6 +4,7 @@ import {
   getProjects,
   getProjectById,
   createProject,
+  deleteProject,
   getCheckins,
   createCheckin,
   getTrendFlags,
@@ -103,4 +104,42 @@ test('TC-DB-05: TrendFlags & Interventions - Creation and retrieval', async () =
   // Updating non-existent intervention should return false
   const notFound = await updateInterventionResponse('invalid-id-xyz', 'helpful');
   assert.equal(notFound, false);
+});
+
+test('TC-DB-06: deleteProject - deletes project and cascades', async () => {
+  // Create a temporary project to delete
+  const newProj = await createProject({
+    name: 'Temporary Project For Deletion',
+    description: 'Will be deleted in TC-DB-06',
+    status: 'active',
+  });
+  assert.ok(newProj.id);
+
+  // Add a checkin to verify cascade
+  const checkin = await createCheckin({
+    project_id: newProj.id,
+    motivation_level: 4,
+    mood: 'focused',
+    task_description: 'Temporary task',
+    blockers: '',
+    ai_feedback: 'Keep going!',
+  });
+  assert.ok(checkin.id);
+
+  // Verify project exists
+  const retrieved = await getProjectById(newProj.id);
+  assert.ok(retrieved);
+  assert.equal(retrieved?.name, 'Temporary Project For Deletion');
+
+  // Delete the project
+  const deleted = await deleteProject(newProj.id);
+  assert.equal(deleted, true);
+
+  // Verify project no longer exists
+  const afterDelete = await getProjectById(newProj.id);
+  assert.equal(afterDelete, null);
+
+  // Deleting non-existent project returns false
+  const deleteNonExistent = await deleteProject('non-existent-id-999');
+  assert.equal(deleteNonExistent, false);
 });

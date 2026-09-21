@@ -22,8 +22,8 @@ import { CheckinForm } from '@/components/checkin/CheckinForm';
 import { InterventionCard } from '@/components/interventions/InterventionCard';
 import { InterventionEfficacyCard } from '@/components/analytics/InterventionEfficacyCard';
 import { evaluateInterventionEfficacy } from '@/lib/interventions/analytics/efficacy';
+import { useRouter } from 'next/navigation';
 import {
-
   ArrowLeft,
   Calendar,
   Sparkles,
@@ -33,7 +33,9 @@ import {
   TrendingUp,
   Activity,
   Minus,
+  Trash2,
 } from 'lucide-react';
+import { DeleteProjectModal } from '@/components/projects/DeleteProjectModal';
 
 export default function ProjectDetailPage({
   params,
@@ -43,11 +45,26 @@ export default function ProjectDetailPage({
   const resolvedParams = use(params);
   const projectId = resolvedParams.id;
 
+  const router = useRouter();
   const [project, setProject] = useState<Project | null>(null);
   const [checkins, setCheckins] = useState<Checkin[]>([]);
   const [interventions, setInterventions] = useState<Intervention[]>([]);
   const [trendAnalysis, setTrendAnalysis] = useState<TrendAnalysisResult | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  const [showDeleteModal, setShowDeleteModal] = useState<boolean>(false);
+
+  const handleDeleteProject = async (id: string) => {
+    try {
+      const { deleteProject } = await import('@/lib/supabase/queries');
+      const success = await deleteProject(id);
+      if (success) {
+        setShowDeleteModal(false);
+        router.push('/dashboard');
+      }
+    } catch (err) {
+      console.error('Error deleting project:', err);
+    }
+  };
 
   const fetchProjectData = async () => {
     setLoading(true);
@@ -168,39 +185,51 @@ export default function ProjectDetailPage({
             </div>
           </div>
 
-          {/* Quick Status Pill */}
-          {trendAnalysis && (
-            <div className="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-4 text-right">
-              <div className="text-[11px] text-slate-400 uppercase tracking-wider">
-                Đánh giá xu hướng hiện tại
+          {/* Quick Status Pill & Actions */}
+          <div className="flex flex-col items-end gap-3">
+            {trendAnalysis && (
+              <div className="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-4 text-right">
+                <div className="text-[11px] text-slate-400 uppercase tracking-wider">
+                  Đánh giá xu hướng hiện tại
+                </div>
+                <div className="text-base font-bold text-white mt-1 flex items-center justify-end gap-1.5">
+                  {trendAnalysis.flagType === 'declining' && (
+                    <span className="text-rose-400 flex items-center gap-1">
+                      <TrendingDown className="w-4 h-4" /> Đang suy giảm đều
+                    </span>
+                  )}
+                  {trendAnalysis.flagType === 'improving' && (
+                    <span className="text-emerald-400 flex items-center gap-1">
+                      <TrendingUp className="w-4 h-4" /> Đang phát triển tốt
+                    </span>
+                  )}
+                  {trendAnalysis.flagType === 'volatile' && (
+                    <span className="text-amber-400 flex items-center gap-1">
+                      <Activity className="w-4 h-4" /> Động lực dao động mạnh
+                    </span>
+                  )}
+                  {trendAnalysis.flagType === 'stable' && (
+                    <span className="text-indigo-400 flex items-center gap-1">
+                      <Minus className="w-4 h-4" /> Giữ mức ổn định
+                    </span>
+                  )}
+                </div>
+                <div className="text-[11px] text-slate-400 mt-1 font-mono">
+                  Slope: {trendAnalysis.slope}/ngày &bull; R²: {(trendAnalysis.rSquared * 100).toFixed(0)}%
+                </div>
               </div>
-              <div className="text-base font-bold text-white mt-1 flex items-center justify-end gap-1.5">
-                {trendAnalysis.flagType === 'declining' && (
-                  <span className="text-rose-400 flex items-center gap-1">
-                    <TrendingDown className="w-4 h-4" /> Đang suy giảm đều
-                  </span>
-                )}
-                {trendAnalysis.flagType === 'improving' && (
-                  <span className="text-emerald-400 flex items-center gap-1">
-                    <TrendingUp className="w-4 h-4" /> Đang phát triển tốt
-                  </span>
-                )}
-                {trendAnalysis.flagType === 'volatile' && (
-                  <span className="text-amber-400 flex items-center gap-1">
-                    <Activity className="w-4 h-4" /> Động lực dao động mạnh
-                  </span>
-                )}
-                {trendAnalysis.flagType === 'stable' && (
-                  <span className="text-indigo-400 flex items-center gap-1">
-                    <Minus className="w-4 h-4" /> Giữ mức ổn định
-                  </span>
-                )}
-              </div>
-              <div className="text-[11px] text-slate-400 mt-1 font-mono">
-                Slope: {trendAnalysis.slope}/ngày &bull; R²: {(trendAnalysis.rSquared * 100).toFixed(0)}%
-              </div>
-            </div>
-          )}
+            )}
+
+            <button
+              type="button"
+              onClick={() => setShowDeleteModal(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-rose-400 hover:text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 transition-all active:scale-95"
+              title="Xóa dự án này vĩnh viễn"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Xóa Dự Án Này</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -348,6 +377,18 @@ export default function ProjectDetailPage({
           </div>
         )}
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {project && (
+        <DeleteProjectModal
+          isOpen={showDeleteModal}
+          projectId={project.id}
+          projectName={project.name}
+          checkinsCount={checkins.length}
+          onClose={() => setShowDeleteModal(false)}
+          onConfirmDelete={handleDeleteProject}
+        />
+      )}
     </div>
   );
 }

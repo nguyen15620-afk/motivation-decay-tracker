@@ -31,12 +31,15 @@ import {
   Sparkles,
   CheckCircle2,
   Clock,
+  Trash2,
 } from 'lucide-react';
+import { DeleteProjectModal } from '@/components/projects/DeleteProjectModal';
 
 interface ProjectCardData {
   project: Project;
   trend: TrendAnalysisResult;
   lastCheckin?: Checkin;
+  checkinsCount: number;
 }
 
 export default function DashboardPage() {
@@ -49,6 +52,25 @@ export default function DashboardPage() {
   const [newProjectName, setNewProjectName] = useState<string>('');
   const [newProjectDesc, setNewProjectDesc] = useState<string>('');
   const [isCreatingProject, setIsCreatingProject] = useState<boolean>(false);
+
+  // Delete Project modal state
+  const [projectToDelete, setProjectToDelete] = useState<{
+    project: Project;
+    checkinsCount: number;
+  } | null>(null);
+
+  const handleDeleteProject = async (id: string) => {
+    try {
+      const { deleteProject } = await import('@/lib/supabase/queries');
+      const success = await deleteProject(id);
+      if (success) {
+        setProjectToDelete(null);
+        await loadDashboardData();
+      }
+    } catch (err) {
+      console.error('Error deleting project:', err);
+    }
+  };
 
   const loadDashboardData = async () => {
     setLoading(true);
@@ -72,6 +94,7 @@ export default function DashboardPage() {
           project,
           trend,
           lastCheckin,
+          checkinsCount: projectCheckins.length,
         };
       });
 
@@ -345,28 +368,44 @@ export default function DashboardPage() {
                       {project.name}
                     </h3>
 
-                    {/* Status Badge */}
-                    {trend.isSuddenDrop ? (
-                      <span className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-full bg-red-600/20 text-red-300 border border-red-500/30 font-medium">
-                        <AlertTriangle className="w-3 h-3" /> Tụt điểm cấp tính
-                      </span>
-                    ) : trend.flagType === 'declining' ? (
-                      <span className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-full bg-rose-500/10 text-rose-400 border border-rose-500/20 font-medium">
-                        <TrendingDown className="w-3 h-3" /> Đang suy giảm
-                      </span>
-                    ) : trend.flagType === 'improving' ? (
-                      <span className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium">
-                        <TrendingUp className="w-3 h-3" /> Đang tiến bộ
-                      </span>
-                    ) : trend.flagType === 'volatile' ? (
-                      <span className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-medium">
-                        <Activity className="w-3 h-3" /> Biến động mạnh
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-medium">
-                        <Minus className="w-3 h-3" /> Ổn định
-                      </span>
-                    )}
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      {/* Status Badge */}
+                      {trend.isSuddenDrop ? (
+                        <span className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-full bg-red-600/20 text-red-300 border border-red-500/30 font-medium">
+                          <AlertTriangle className="w-3 h-3" /> Tụt điểm cấp tính
+                        </span>
+                      ) : trend.flagType === 'declining' ? (
+                        <span className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-full bg-rose-500/10 text-rose-400 border border-rose-500/20 font-medium">
+                          <TrendingDown className="w-3 h-3" /> Đang suy giảm
+                        </span>
+                      ) : trend.flagType === 'improving' ? (
+                        <span className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium">
+                          <TrendingUp className="w-3 h-3" /> Đang tiến bộ
+                        </span>
+                      ) : trend.flagType === 'volatile' ? (
+                        <span className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-medium">
+                          <Activity className="w-3 h-3" /> Biến động mạnh
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-medium">
+                          <Minus className="w-3 h-3" /> Ổn định
+                        </span>
+                      )}
+
+                      {/* Delete Project Quick Action */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setProjectToDelete({ project, checkinsCount: projectCards.find((c) => c.project.id === project.id)?.checkinsCount || 0 });
+                        }}
+                        title={`Xóa dự án "${project.name}"`}
+                        className="p-1 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors opacity-80 hover:opacity-100"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
 
                   <p className="text-xs text-slate-400 mt-2 line-clamp-2">
@@ -486,6 +525,16 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
+
+      {/* Delete Confirmation Modal */}
+      <DeleteProjectModal
+        isOpen={Boolean(projectToDelete)}
+        projectId={projectToDelete?.project.id || ''}
+        projectName={projectToDelete?.project.name || ''}
+        checkinsCount={projectToDelete?.checkinsCount}
+        onClose={() => setProjectToDelete(null)}
+        onConfirmDelete={handleDeleteProject}
+      />
     </div>
   );
 }

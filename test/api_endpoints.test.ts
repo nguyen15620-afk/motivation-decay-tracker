@@ -5,6 +5,8 @@ import { POST as handleCheckin } from '../app/api/checkins/route';
 import { POST as handleFeedback } from '../app/api/interventions/[id]/feedback/route';
 import { GET as handleTrend } from '../app/api/trend/[projectId]/route';
 import { GET as handleCron } from '../app/api/cron/analyze-trends/route';
+import { POST as handleCreateProject } from '../app/api/projects/route';
+import { GET as handleProjectDetail, DELETE as handleDeleteProject } from '../app/api/projects/[id]/route';
 
 test('TC-API-01: POST /api/checkins - Rejects missing project_id with 400', async () => {
   const req = new NextRequest('http://localhost:3000/api/checkins', {
@@ -136,4 +138,44 @@ test('TC-API-08: GET /api/cron/analyze-trends - Runs background scan and generat
   assert.equal(data.success, true);
   assert.ok(data.totalActiveProjects >= 4);
   assert.ok(Array.isArray(data.summary));
+});
+
+test('TC-API-09: GET & DELETE /api/projects/[id] - Lifecycle tests', async () => {
+  // 1. Create a project first via API
+  const createReq = new NextRequest('http://localhost:3000/api/projects', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: 'Project to be Deleted Via API',
+      description: 'Test API endpoint delete',
+    }),
+  });
+  const createRes = await handleCreateProject(createReq);
+  assert.equal(createRes.status, 201);
+  const createdData = await createRes.json();
+  const projectId = createdData.project.id;
+  assert.ok(projectId);
+
+  // 2. GET /api/projects/[id] returns 200
+  const getReq = new NextRequest(`http://localhost:3000/api/projects/${projectId}`);
+  const getRes = await handleProjectDetail(getReq, { params: Promise.resolve({ id: projectId }) });
+  assert.equal(getRes.status, 200);
+  const getData = await getRes.json();
+  assert.equal(getData.project.name, 'Project to be Deleted Via API');
+
+  // 3. DELETE /api/projects/[id] returns 200
+  const deleteReq = new NextRequest(`http://localhost:3000/api/projects/${projectId}`, {
+    method: 'DELETE',
+  });
+  const deleteRes = await handleDeleteProject(deleteReq, { params: Promise.resolve({ id: projectId }) });
+  assert.equal(deleteRes.status, 200);
+  const deleteData = await deleteRes.json();
+  assert.equal(deleteData.success, true);
+
+  // 4. Subsequent GET returns 404
+  const getAfterDeleteRes = await handleProjectDetail(getReq, { params: Promise.resolve({ id: projectId }) });
+  assert.equal(getAfterDeleteRes.status, 404);
+
+  // 5. Subsequent DELETE returns 404
+  const deleteAgainRes = await handleDeleteProject(deleteReq, { params: Promise.resolve({ id: projectId }) });
+  assert.equal(deleteAgainRes.status, 404);
 });
